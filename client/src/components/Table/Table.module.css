@@ -1,0 +1,28 @@
+.price .changeRed, .changeGreen{
+    display: none;
+}
+.changeRed, .changeGreen {
+    padding-top: 6px;
+    height: 30px;
+    color: white;
+    
+}
+.price:hover {
+    cursor: pointer;
+} 
+
+.price:hover .changeGreen {
+  display: inline;
+  position: absolute; 
+  z-index: 100;
+  background-color: #4CAF50;
+  border: 1px solid #ccc;
+}
+
+.price:hover .changeRed {
+    display: inline;
+    position: absolute; 
+    z-index: 100;
+    background-color: red;
+    border: 1px solid #ccc;
+  }

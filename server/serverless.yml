@@ -1,0 +1,150 @@
+service: workshop-serverless-graphql
+app: workshop-serverless-graphql
+plugins:
+  - serverless-esbuild
+package:
+  individually: true
+provider:
+  name: aws
+  runtime: nodejs16.x
+  stackName: workshop-serverless-graphql-${self:provider.stage}
+  region: ${opt:region, 'us-east-1'}
+  stage: ${opt:stage, 'dev'}
+  versionFunctions: false
+  environment: 
+    API_URL: https://min-api.cryptocompare.com/
+    REMOTE_URL: {
+      "Fn::Join":
+        [
+          "",
+          [" https://",
+            { "Ref": "ApiGatewayRestApi" },
+            ".execute-api.${self:provider.region}.amazonaws.com/${self:provider.stage}/"
+          ]
+        ]
+    }
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - sqs:*
+      Resource:
+        Fn::GetAtt: [ IngestQueue, Arn ]
+    - Effect: "Allow"
+      Action:
+        - s3:*
+      Resource:
+        Fn::Join: ['', [Fn::GetAtt: [ OriginBucket, Arn ], '/*'] ]
+    - Effect: Allow
+      Action:
+        - dynamodb:*
+      Resource:
+        - Fn::GetAtt: [ DataTable, Arn ]
+        - Fn::Join:
+            - "/"
+            - - { "Fn::GetAtt": [ DataTable, Arn ] }
+              - "index/*"
+    - Effect: Allow
+      Action: ssm:GetParameters
+      Resource:
+        - 'arn:aws:ssm:${aws:region}:${aws:accountId}:parameter/API_KEY'
+    - Effect: Allow
+      Action: kms:Decrypt
+      Resource:
+        - 'arn:aws:kms:${aws:region}:${aws:accountId}:alias/aws/ssm'
+    - Effect: Allow
+      Action:
+        - lambda:InvokeFunction
+        - lambda:InvokeAsync
+      Resource: "*"
+
+custom:
+  dataTableName: data-${self:provider.stage}
+  originBucketName: ${self:provider.stackName}-images-bucket
+  ingestQueue: ${self:service}-ingest-${self:provider.stage}
+
+functions:
+  pull-data:
+    name: ${self:provider.stackName}-pull-data
+    handler: src/functions/pull-data.handler
+    events:
+      - schedule: rate(1 hour)
+  ingest:
+    name: ${self:provider.stackName}-ingest
+    handler: src/functions/ingest.handler
+    environment:
+      QUEUE_NAME: ${self:custom.ingestQueue}
+      QUEUE: !Ref IngestQueue
+    events:
+      - http:
+          path: ingest
+          method: post
+          cors: true
+  process:
+    name: ${self:provider.stackName}-process
+    handler: src/functions/process.handler
+    environment:
+      DATA_TABLE: ${self:custom.dataTableName}
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - IngestQueue
+              - Arn
+  expose:
+    name: ${self:provider.stackName}-expose
+    handler: src/functions/expose.handler
+    environment:
+      DATA_TABLE: ${self:custom.dataTableName}
+    events:
+      - http:
+          path: expose
+          method: get
+          cors: true
+  graphql:
+    name: ${self:provider.stackName}-graphql
+    handler: src/functions/graphql.handler
+    environment:
+      STAGE: ${self:provider.stage}
+      NODE_ENV: development
+    events:
+      - http:
+          path: graphql
+          method: post
+          cors: true
+      - http:
+          path: graphql
+          method: get
+          cors: true
+  # origin-response:
+  #   name: ${self:provider.stackName}-origin-response
+  #   handler: src/functions/origin-response.handler
+  #   memorySize: 128
+  #   timeout: 4
+  #   events:
+  #     - cloudFront:
+  #         eventType: origin-response
+  #         origin: s3://${self:custom.originBucketName}.s3.amazonaws.com/files
+  # viewer-request:
+  #   name: ${self:provider.stackName}-viewer-request
+  #   handler: src/functions/viewer-request.handler
+  #   memorySize: 128
+  #   timeout: 4
+  #   events:
+  #     - cloudFront:
+  #         eventType: viewer-request
+  #         origin: s3://${self:custom.originBucketName}.s3.amazonaws.com/files
+  store-to-s3:
+    name: ${self:provider.stackName}-store-to-s3
+    handler: src/functions/store-to-s3.handler
+    environment:
+      ORIGIN_BUCKET_NAME: ${self:custom.originBucketName}
+      IMAGE_URL: https://cryptocompare.com
+    events:
+      - stream:
+          type: dynamodb
+          arn:
+            Fn::GetAtt: [DataTable, StreamArn]
+
+resources:
+  - ${file(resources/origin-bucket.yml)}
+  - ${file(resources/resources.yml)}

@@ -1,0 +1,8 @@
+Description: Serverless GraphQL Workshop by Levi9
+Resources:
+  OriginBucket:
+    Type: AWS::S3::Bucket
+    #    AWS CloudFormation keeps the resource without deleting it when its stack is deleted.
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: ${self:custom.originBucketName}
